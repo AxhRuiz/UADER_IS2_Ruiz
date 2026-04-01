@@ -19,7 +19,7 @@ def factorial(num):
             fact *= num 
             num -= 1
         return fact 
-
+#ESTE ES UN COMENTARIO NUEVO
 
 if len(sys.argv) < 2:
     # Sin argumento, solicitar entrada
