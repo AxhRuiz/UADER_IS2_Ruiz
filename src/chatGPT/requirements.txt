@@ -1,0 +1,7 @@
+# Dependencias para testing y cobertura
+pytest>=7.4.0
+pytest-cov>=4.1.0
+coverage>=7.3.0
+
+# Opcional: para reportes HTML bonitos
+pytest-html>=3.2.0

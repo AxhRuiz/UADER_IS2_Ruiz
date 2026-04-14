@@ -1,0 +1,1035 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys
+import math
+import operator
+from typing import Union, List, Dict, Callable, Optional, Tuple
+
+
+
+class RPNError(Exception):
+    """
+    Excepción base para todos los errores de la calculadora RPN.
+    Todas las demás excepciones heredan de esta clase.
+    """
+    pass
+
+
+class TokenInvalidoError(RPNError):
+    """
+    Excepción lanzada cuando se encuentra un token no reconocido.
+    
+    Un token es inválido si no es un número, operador, función o comando
+    reconocido por la calculadora.
+    """
+    pass
+
+
+class PilaInsuficienteError(RPNError):
+    """
+    Excepción lanzada cuando no hay suficientes operandos en la pila.
+    
+    Ocurre cuando se intenta ejecutar una operación que requiere más
+    elementos de los que actualmente están disponibles en la pila.
+    """
+    pass
+
+
+class DivisionPorCeroError(RPNError):
+    """
+    Excepción lanzada cuando se intenta dividir por cero.
+    
+    Matemáticamente, la división por cero no está definida en el conjunto
+    de los números reales.
+    """
+    pass
+
+
+class PilaFinalIncorrectaError(RPNError):
+    """
+    Excepción lanzada cuando la pila no termina con exactamente un valor.
+    
+    En RPN, una expresión válida debe reducirse a un único valor al finalizar
+    la evaluación. Si quedan 0 o múltiples valores, la expresión es inválida.
+    """
+    pass
+
+
+class ErrorDominioMatematico(RPNError):
+    """
+    Excepción lanzada cuando una función matemática recibe un argumento
+    fuera de su dominio de definición en los números reales.
+    
+    Ejemplos:
+        - Raíz cuadrada de un número negativo: sqrt(-1)
+        - Logaritmo de cero o negativo: ln(0), log(-5)
+        - Arcoseno de un valor >1: asin(2)
+    """
+    pass
+
+
+class ErrorMemoriaInvalida(RPNError):
+    """
+    Excepción lanzada cuando se intenta acceder a una memoria no inicializada.
+    
+    Las memorias deben ser inicializadas con STO antes de poder ser
+    recuperadas con RCL.
+    """
+    pass
+
+
+class ErrorIndiceMemoria(RPNError):
+    """
+    Excepción lanzada cuando se proporciona un índice de memoria inválido.
+    
+    Los índices válidos son exclusivamente de 00 a 09 (formato de dos dígitos).
+    """
+    pass
+
+
+# ==============================================================================
+#  CLASE PRINCIPAL: CALCULADORA RPN
+# ==============================================================================
+
+class CalculadoraRPN:
+    """
+    Máquina virtual de evaluación RPN (Notación Polaca Inversa).
+    
+    Esta clase implementa el núcleo de la calculadora científica, manteniendo
+    el estado de la pila de operandos y el banco de 10 memorias (00-09).
+    
+    Atributos:
+        pila (List[Union[int, float]]): Pila LIFO para operandos
+        memorias (Dict[int, float]): Diccionario que almacena valores en 00-09
+        comandos (Dict[str, Tuple[int, Callable]]): Tabla de operaciones disponibles
+    
+    Principio de Funcionamiento:
+    ---------------------------
+    1. Los tokens de la expresión se procesan secuencialmente
+    2. Los números se apilan (push) en la pila
+    3. Los operadores y funciones consumen operandos de la pila y apilan el resultado
+    4. Al finalizar, la pila debe contener exactamente un valor
+    
+    Ejemplo de Flujo:
+    -----------------
+    Expresión: "3 4 + 2 *"
+    
+    Token '3'    -> pila = [3]
+    Token '4'    -> pila = [3, 4]
+    Token '+'    -> pop 4, pop 3 -> 3+4=7 -> push 7 -> pila = [7]
+    Token '2'    -> pila = [7, 2]
+    Token '*'    -> pop 2, pop 7 -> 7*2=14 -> push 14 -> pila = [14]
+    
+    Resultado: 14
+    """
+    
+    def __init__(self):
+        """
+        Inicializa una nueva instancia de la calculadora RPN.
+        
+        Crea una pila vacía, un diccionario vacío para las memorias,
+        e inicializa la tabla de comandos disponibles.
+        """
+        # Estructura de datos principal: pila LIFO para operandos
+        self.pila: List[Union[int, float]] = []
+        
+        # Banco de 10 memorias (índices 0-9), inicialmente vacías
+        self.memorias: Dict[int, float] = {}
+        
+        # Construir la tabla de comandos (operadores, funciones, constantes)
+        self._inicializar_comandos()
+    
+    def _inicializar_comandos(self):
+        """
+        Inicializa la tabla de comandos con todas las operaciones disponibles.
+        
+        Estructura de la tabla:
+            {token: (aridad, funcion)}
+        
+        Donde:
+            - aridad 0: Constante (se apila sin consumir operandos)
+            - aridad 1: Función unaria (consume 1 operando, apila 1 resultado)
+            - aridad 2: Función binaria (consume 2 operandos, apila 1 resultado)
+        
+        Esta tabla permite añadir nuevas operaciones de forma declarativa
+        sin modificar la lógica de evaluación.
+        """
+        self.comandos: Dict[str, Tuple[int, Callable]] = {}
+        
+        # ----------------------------------------------------------------------
+        # CONSTANTES MATEMÁTICAS (aridad = 0)
+        # ----------------------------------------------------------------------
+        # Las constantes no consumen operandos de la pila, simplemente
+        # añaden su valor cuando son encontradas.
+        
+        constantes = {
+            'p': math.pi,           # π ≈ 3.141592653589793
+            'pi': math.pi,          # Alias para π
+            'e': math.e,            # Número de Euler ≈ 2.718281828459045
+            'j': (1 + math.sqrt(5)) / 2,  # φ (número áureo) ≈ 1.618033988749895
+            'phi': (1 + math.sqrt(5)) / 2  # Alias para φ
+        }
+        
+        # Usamos closure con valor fijo para evitar problemas de late binding
+        for token, valor in constantes.items():
+            self.comandos[token] = (0, lambda v=valor: v)
+        
+        # ----------------------------------------------------------------------
+        # FUNCIONES UNARIAS (aridad = 1)
+        # ----------------------------------------------------------------------
+        # Consumen el valor en el tope de la pila y apilan el resultado.
+        
+        funciones_unarias = {
+            # --- Algebraicas ---
+            'chs': lambda x: -x,                    # Cambio de signo (+/-)
+            'neg': lambda x: -x,                    # Alias para cambio de signo
+            'inv': lambda x: 1 / x if x != 0 else self._error_div_cero(1, x),
+            '1/x': lambda x: 1 / x if x != 0 else self._error_div_cero(1, x),
+            'sqrt': lambda x: self._validar_dominio(x, math.sqrt, "sqrt", x >= 0),
+            
+            # --- Logarítmicas y exponenciales ---
+            'ln': lambda x: self._validar_dominio(x, math.log, "ln", x > 0),
+            'log': lambda x: self._validar_dominio(x, math.log10, "log", x > 0),
+            'exp': lambda x: math.exp(x),           # e^x
+            'ex': lambda x: math.exp(x),            # Alias para e^x
+            '10x': lambda x: 10 ** x,               # 10^x (antilogaritmo)
+            
+            # --- Trigonométricas (entrada y salida en GRADOS) ---
+            'sin': lambda x: math.sin(math.radians(x)),
+            'cos': lambda x: math.cos(math.radians(x)),
+            'tg': lambda x: self._validar_tangente(x),
+            'tan': lambda x: self._validar_tangente(x),
+            
+            # --- Trigonométricas inversas (salida en GRADOS) ---
+            'asin': lambda x: self._validar_arcseno(x),
+            'acos': lambda x: self._validar_arcocoseno(x),
+            'atg': lambda x: math.degrees(math.atan(x)),
+            'atan': lambda x: math.degrees(math.atan(x)),
+        }
+        
+        for token, func in funciones_unarias.items():
+            self.comandos[token] = (1, func)
+        
+        # ----------------------------------------------------------------------
+        # FUNCIONES BINARIAS (aridad = 2)
+        # ----------------------------------------------------------------------
+        # Consumen dos valores de la pila y apilan el resultado.
+        # El orden de consumo es: primero el operando derecho, luego el izquierdo.
+        
+        funciones_binarias = {
+            # --- Operaciones aritméticas básicas ---
+            '+': operator.add,
+            '-': operator.sub,
+            '*': operator.mul,
+            'x': operator.mul,      # Alias para multiplicación (evita escape en shell)
+            'X': operator.mul,      # Alias en mayúscula
+            '/': lambda a, b: a / b if b != 0 else self._error_div_cero(a, b),
+            
+            # --- Potencias y exponenciación ---
+            'pow': lambda a, b: self._validar_potencia(a, b),
+            'yx': lambda a, b: self._validar_potencia(a, b),
+            '^': lambda a, b: self._validar_potencia(a, b),
+        }
+        
+        for token, func in funciones_binarias.items():
+            self.comandos[token] = (2, func)
+    
+    # ==========================================================================
+    #  MÉTODOS AUXILIARES DE VALIDACIÓN MATEMÁTICA
+    # ==========================================================================
+    # Estos métodos encapsulan la lógica de validación de dominio para
+    # funciones matemáticas, lanzando excepciones descriptivas cuando
+    # los argumentos están fuera del dominio permitido.
+    
+    @staticmethod
+    def _error_div_cero(a, b):
+        """
+        Lanza una excepción controlada para división por cero.
+        
+        Args:
+            a: Numerador
+            b: Denominador (cero)
+            
+        Raises:
+            DivisionPorCeroError: Siempre
+        """
+        raise DivisionPorCeroError(f"División por cero: {a} / {b}")
+
+    @staticmethod
+    def _validar_dominio(x, func, nombre, condicion):
+        """
+        Valida que un valor esté dentro del dominio de una función matemática.
+        
+        Args:
+            x: Valor a evaluar
+            func: Función a ejecutar si el dominio es válido
+            nombre: Nombre de la función para el mensaje de error
+            condicion: Condición booleana que debe cumplirse
+            
+        Returns:
+            Resultado de func(x) si la condición es verdadera
+            
+        Raises:
+            ErrorDominioMatematico: Si la condición es falsa
+        """
+        if not condicion:
+            raise ErrorDominioMatematico(
+                f"Error de dominio: {nombre}({x}) no está definido en ℝ."
+            )
+        return func(x)
+    
+    @staticmethod
+    def _validar_tangente(x):
+        """
+        Valida que la tangente esté definida para el ángulo dado.
+        
+        La función tangente tiene asíntotas verticales en 90° + k·180°
+        para cualquier entero k. En estos puntos, la función no está definida.
+        
+        Args:
+            x: Ángulo en grados
+            
+        Returns:
+            math.tan(math.radians(x)) si está definida
+            
+        Raises:
+            ErrorDominioMatematico: Si x ≡ 90° (mod 180°)
+        """
+        x_mod = x % 180
+        # Usamos tolerancia para evitar falsos positivos por redondeo
+        if abs(x_mod - 90) < 1e-12:
+            raise ErrorDominioMatematico(
+                f"tan({x}°) no está definida (asíntota vertical en 90° + k·180°)."
+            )
+        return math.tan(math.radians(x))
+    
+    @staticmethod
+    def _validar_arcseno(x):
+        """
+        Valida el dominio de la función arcoseno y aplica clamping.
+        
+        La función arcsin(x) está definida únicamente para x ∈ [-1, 1].
+        Se aplica redondeo a 15 decimales para evitar errores de precisión
+        por acumulación de operaciones de punto flotante.
+        
+        Args:
+            x: Valor a evaluar (debe estar en [-1, 1])
+            
+        Returns:
+            math.degrees(math.asin(x_clamped)): Ángulo en grados
+            
+        Raises:
+            ErrorDominioMatematico: Si x ∉ [-1, 1]
+        """
+        x_rounded = round(x, 15)
+        if not -1 <= x_rounded <= 1:
+            raise ErrorDominioMatematico(
+                f"asin({x}) no está definido. Dominio: [-1, 1]."
+            )
+        x_clamped = max(-1.0, min(1.0, x_rounded))
+        return math.degrees(math.asin(x_clamped))
+    
+    @staticmethod
+    def _validar_arcocoseno(x):
+        """
+        Valida el dominio de la función arcocoseno y aplica clamping.
+        
+        La función arccos(x) está definida únicamente para x ∈ [-1, 1].
+        Se aplica redondeo a 15 decimales para evitar errores de precisión.
+        
+        Args:
+            x: Valor a evaluar (debe estar en [-1, 1])
+            
+        Returns:
+            math.degrees(math.acos(x_clamped)): Ángulo en grados
+            
+        Raises:
+            ErrorDominioMatematico: Si x ∉ [-1, 1]
+        """
+        x_rounded = round(x, 15)
+        if not -1 <= x_rounded <= 1:
+            raise ErrorDominioMatematico(
+                f"acos({x}) no está definido. Dominio: [-1, 1]."
+            )
+        x_clamped = max(-1.0, min(1.0, x_rounded))
+        return math.degrees(math.acos(x_clamped))
+    
+    @staticmethod
+    def _validar_potencia(base, exp):
+        """
+        Valida operaciones de potencia en el dominio de los números reales.
+        
+        Casos especiales manejados:
+        - 0^0: Indeterminación matemática -> ErrorDominioMatematico
+        - 0^negativo: Equivale a división por cero -> DivisionPorCeroError
+        - Base negativa con exponente fraccionario: Resultado complejo -> ErrorDominioMatematico
+        
+        Args:
+            base: Base de la potencia
+            exp: Exponente
+            
+        Returns:
+            base ** exp si la operación es válida en ℝ
+            
+        Raises:
+            ErrorDominioMatematico: Para 0^0 o base negativa con exp fraccionario
+            DivisionPorCeroError: Para 0^negativo
+        """
+        # Caso: 0^0 es indeterminado
+        if base == 0 and exp <= 0:
+            if exp == 0:
+                raise ErrorDominioMatematico("0^0 es indeterminado.")
+            else:
+                raise DivisionPorCeroError(f"División por cero en {base}^{exp}.")
+        
+        # Caso: Base negativa con exponente no entero -> Número complejo
+        if base < 0 and isinstance(exp, float) and not exp.is_integer():
+            raise ErrorDominioMatematico(
+                f"{base}^{exp} es complejo (no real)."
+            )
+        
+        return base ** exp
+    
+    # ==========================================================================
+    #  VALIDACIONES DE PILA (Métodos auxiliares extraídos)
+    # ==========================================================================
+    
+    def _validar_pila_no_vacia(self, comando: str):
+        """
+        Valida que la pila no esté vacía.
+        
+        Args:
+            comando: Nombre del comando para el mensaje de error
+            
+        Raises:
+            PilaInsuficienteError: Si la pila está vacía
+        """
+        if not self.pila:
+            raise PilaInsuficienteError(
+                f"'{comando}' requiere al menos 1 elemento en la pila."
+            )
+    
+    def _validar_pila_minima(self, cantidad: int, comando: str):
+        """
+        Valida que la pila tenga al menos 'cantidad' elementos.
+        
+        Args:
+            cantidad: Número mínimo de elementos requeridos
+            comando: Nombre del comando para el mensaje de error
+            
+        Raises:
+            PilaInsuficienteError: Si la pila tiene menos elementos
+        """
+        if len(self.pila) < cantidad:
+            raise PilaInsuficienteError(
+                f"'{comando}' requiere al menos {cantidad} elementos en la pila."
+            )
+    
+    # ==========================================================================
+    #  MANEJO DE MEMORIAS (STO / RCL)
+    # ==========================================================================
+    
+    def _parsear_indice_memoria(self, token: str) -> int:
+        """
+        Convierte un token de memoria ('00'-'09') a su valor entero (0-9).
+        
+        El formato requerido es estricto: exactamente dos dígitos, con cero
+        a la izquierda para valores menores a 10.
+        
+        Args:
+            token: Cadena con el índice (ej: '00', '05', '09')
+            
+        Returns:
+            int: Valor entero del índice (0-9)
+            
+        Raises:
+            ErrorIndiceMemoria: Si el formato no es válido o está fuera de rango
+        """
+        # Validar formato: debe empezar con '0', longitud 2, y ser dígito
+        if not (token.startswith('0') and len(token) == 2 and token.isdigit()):
+            raise ErrorIndiceMemoria(
+                f"Índice de memoria inválido: '{token}'. Use 00, 01, ..., 09."
+            )
+        
+        idx = int(token)
+        
+        # Validar rango: 0-9
+        if not 0 <= idx <= 9:
+            raise ErrorIndiceMemoria(
+                f"Memoria fuera de rango: {idx}. Use 00-09."
+            )
+        
+        return idx
+    
+    def _comando_sto(self, indice: int):
+        """
+        Almacena (STOre) el valor en el tope de la pila en la memoria especificada.
+        
+        IMPORTANTE: Siguiendo el comportamiento de calculadoras HP clásicas,
+        este comando NO consume el valor de la pila; solo lo copia.
+        
+        Args:
+            indice: Índice de memoria (0-9)
+            
+        Raises:
+            PilaInsuficienteError: Si la pila está vacía
+        """
+        self._validar_pila_no_vacia(f"STO {indice:02d}")
+        
+        # Copiar el tope de la pila (sin hacer pop)
+        valor = self.pila[-1]
+        self.memorias[indice] = valor
+    
+    def _comando_rcl(self, indice: int):
+        """
+        Recupera (ReCaLl) un valor de memoria y lo apila (push).
+        
+        Args:
+            indice: Índice de memoria (0-9)
+            
+        Raises:
+            ErrorMemoriaInvalida: Si la memoria no ha sido inicializada
+        """
+        if indice not in self.memorias:
+            raise ErrorMemoriaInvalida(
+                f"RCL {indice:02d}: La memoria está vacía. "
+                "Guarde un valor primero con STO."
+            )
+        
+        self.pila.append(self.memorias[indice])
+    
+    # ==========================================================================
+    #  PROCESAMIENTO DE TOKENS (Refactorizado para menor complejidad)
+    # ==========================================================================
+    
+    def _es_comando_pila(self, token: str) -> bool:
+        """Verifica si el token es un comando de manipulación de pila."""
+        return token in ('dup', 'swap', 'drop', 'clear', 'clr')
+    
+    def _procesar_comando_pila(self, token: str):
+        """
+        Procesa comandos de manipulación de pila.
+        
+        Args:
+            token: Comando a procesar (dup, swap, drop, clear, clr)
+        """
+        if token == 'dup':
+            self._validar_pila_no_vacia("dup")
+            self.pila.append(self.pila[-1])
+        elif token == 'swap':
+            self._validar_pila_minima(2, "swap")
+            self.pila[-1], self.pila[-2] = self.pila[-2], self.pila[-1]
+        elif token == 'drop':
+            self._validar_pila_no_vacia("drop")
+            self.pila.pop()
+        elif token in ('clear', 'clr'):
+            self.pila.clear()
+    
+    def _es_numero(self, token: str) -> bool:
+        """Verifica si el token puede ser interpretado como número."""
+        try:
+            float(token)
+            return True
+        except ValueError:
+            return False
+    
+    def _procesar_numero(self, token: str):
+        """
+        Procesa un token numérico y lo apila.
+        
+        Args:
+            token: Cadena con el número a procesar
+        """
+        if '.' in token or 'e' in token.lower():
+            self.pila.append(float(token))
+        else:
+            self.pila.append(int(token))
+    
+    def _procesar_comando_matematico(self, token: str):
+        """
+        Procesa comandos matemáticos (constantes, funciones).
+        
+        Args:
+            token: Comando matemático a procesar
+            
+        Raises:
+            PilaInsuficienteError: Si no hay suficientes operandos
+        """
+        aridad, funcion = self.comandos[token]
+        
+        if aridad > len(self.pila):
+            raise PilaInsuficienteError(
+                f"'{token}' requiere {aridad} operandos, "
+                f"pero la pila tiene {len(self.pila)}."
+            )
+        
+        if aridad == 0:
+            self.pila.append(funcion())
+        elif aridad == 1:
+            x = self.pila.pop()
+            self.pila.append(funcion(x))
+        elif aridad == 2:
+            b = self.pila.pop()
+            a = self.pila.pop()
+            self.pila.append(funcion(a, b))
+    
+    def evaluar_token(self, token: str):
+        """
+        Procesa un token individual y modifica la pila según corresponda.
+        
+        Este método ha sido refactorizado para reducir la complejidad
+        ciclomática delegando en métodos especializados.
+        
+        Args:
+            token: Cadena con el token a procesar
+            
+        Raises:
+            TokenInvalidoError: Token no reconocido
+            PilaInsuficienteError: No hay suficientes operandos
+        """
+        token_lower = token.lower()
+        
+        # 1. Comandos de manipulación de pila
+        if self._es_comando_pila(token_lower):
+            self._procesar_comando_pila(token_lower)
+            return
+        
+        # 2. Validación preventiva de STO/RCL sin índice
+        if token_lower in ('sto', 'rcl'):
+            raise TokenInvalidoError(
+                f"{token.upper()} debe ir seguido de un índice (00-09). "
+                "Ejemplo: sto 05"
+            )
+        
+        # 3. Parseo de números
+        if self._es_numero(token):
+            self._procesar_numero(token)
+            return
+        
+        # 4. Comandos matemáticos predefinidos
+        if token_lower in self.comandos:
+            self._procesar_comando_matematico(token_lower)
+            return
+        
+        # 5. Token no reconocido
+        raise TokenInvalidoError(
+            f"Token '{token}' no reconocido. Use 'help' para ver comandos disponibles."
+        )
+    
+    # ==========================================================================
+    #  EVALUACIÓN DE EXPRESIONES (Refactorizado para menor complejidad)
+    # ==========================================================================
+    
+    def _tokenizar(self, expresion: str) -> List[str]:
+        """
+        Tokeniza y valida la expresión de entrada.
+        
+        Args:
+            expresion: Cadena con la expresión RPN
+            
+        Returns:
+            Lista de tokens
+            
+        Raises:
+            PilaFinalIncorrectaError: Si la expresión está vacía
+        """
+        expresion = expresion.strip()
+        if not expresion:
+            raise PilaFinalIncorrectaError("Expresión vacía.")
+        return expresion.split()
+    
+    def _es_comando_memoria(self, token: str) -> bool:
+        """Verifica si un token es STO o RCL."""
+        return token.lower() in ('sto', 'rcl')
+    
+    def _procesar_comando_memoria(self, tokens: List[str], i: int) -> int:
+        """
+        Procesa un comando de memoria (STO/RCL) y retorna el nuevo índice.
+        
+        Args:
+            tokens: Lista completa de tokens
+            i: Índice actual del comando
+            
+        Returns:
+            Nuevo índice después de procesar el comando y su argumento
+            
+        Raises:
+            TokenInvalidoError: Si falta el índice
+        """
+        if i + 1 >= len(tokens):
+            raise TokenInvalidoError(
+                f"{tokens[i].upper()} requiere un índice 00-09."
+            )
+        
+        comando = tokens[i].lower()
+        idx_token = tokens[i + 1]
+        indice = self._parsear_indice_memoria(idx_token)
+        
+        if comando == 'sto':
+            self._comando_sto(indice)
+        else:
+            self._comando_rcl(indice)
+        
+        return i + 2
+    
+    def _procesar_token_seguro(self, token: str):
+        """
+        Procesa un token con manejo de excepciones.
+        
+        Args:
+            token: Token a procesar
+            
+        Raises:
+            RPNError: Si ocurre cualquier error durante el procesamiento
+        """
+        try:
+            self.evaluar_token(token)
+        except RPNError:
+            raise
+        except Exception as e:
+            raise RPNError(f"Error interno en token '{token}': {e}")
+    
+    def _obtener_resultado_final(self) -> Union[int, float]:
+        """
+        Verifica el estado final de la pila y retorna el resultado.
+        
+        Returns:
+            El valor único en la pila
+            
+        Raises:
+            PilaFinalIncorrectaError: Si la pila no tiene exactamente 1 elemento
+        """
+        if len(self.pila) == 1:
+            return self.pila[0]
+        elif len(self.pila) == 0:
+            raise PilaFinalIncorrectaError(
+                "Pila vacía al finalizar la expresión."
+            )
+        else:
+            elementos = ', '.join(str(x) for x in self.pila)
+            raise PilaFinalIncorrectaError(
+                f"Expresión incompleta. Pila con {len(self.pila)} elementos: [{elementos}]."
+            )
+    
+    def evaluar_expresion(self, expresion: str) -> Union[int, float]:
+        """
+        Evalúa una expresión RPN completa y retorna el resultado.
+        
+        Este método ha sido refactorizado para reducir la complejidad
+        ciclomática extrayendo la lógica en métodos auxiliares.
+        
+        Args:
+            expresion: Cadena con la expresión en notación RPN
+            
+        Returns:
+            Union[int, float]: Resultado de la evaluación
+            
+        Raises:
+            PilaFinalIncorrectaError: Si la pila no termina con exactamente 1 valor
+            TokenInvalidoError: Si hay tokens mal formados
+            Otras excepciones específicas según la operación
+        """
+        # Iniciar con pila limpia
+        self.pila.clear()
+        
+        # Tokenizar la expresión
+        tokens = self._tokenizar(expresion)
+        
+        # Procesar tokens secuencialmente
+        i = 0
+        while i < len(tokens):
+            if self._es_comando_memoria(tokens[i]):
+                i = self._procesar_comando_memoria(tokens, i)
+            else:
+                self._procesar_token_seguro(tokens[i])
+                i += 1
+        
+        # Retornar resultado final
+        return self._obtener_resultado_final()
+
+
+# ==============================================================================
+#  CLASE DE INTERFAZ DE USUARIO (Separa lógica de presentación)
+# ==============================================================================
+
+class InterfazRPN:  # pragma: no cover - Interfaz de usuario, no requiere pruebas unitarias
+    """
+    Maneja la interacción con el usuario (modos de ejecución).
+    
+    Esta clase separa la lógica de presentación de la lógica de cálculo,
+    reduciendo la complejidad ciclomática de la función main().
+    """
+    
+    def __init__(self):  # pragma: no cover
+        """Inicializa la interfaz con una calculadora."""
+        self.calc = CalculadoraRPN()
+    
+    def ejecutar(self, args: List[str]) -> int:  # pragma: no cover
+        """
+        Punto de entrada principal. Retorna código de salida.
+        
+        Args:
+            args: Argumentos de línea de comandos (sys.argv)
+            
+        Returns:
+            Código de salida (0 = éxito, 1 = error)
+        """
+        if self._es_modo_test(args):
+            return self._ejecutar_modo_test()
+        elif self._es_modo_help(args):
+            return self._ejecutar_modo_help()
+        elif self._es_modo_argumento(args):
+            return self._ejecutar_modo_argumento(args)
+        else:
+            return self._ejecutar_modo_interactivo()
+    
+    def _es_modo_test(self, args: List[str]) -> bool:  # pragma: no cover
+        """Verifica si se invocó con --test."""
+        return len(args) == 2 and args[1] == "--test"
+    
+    def _es_modo_help(self, args: List[str]) -> bool:  # pragma: no cover
+        """Verifica si se invocó con --help o -h."""
+        return len(args) == 2 and args[1] in ("--help", "-h")
+    
+    def _es_modo_argumento(self, args: List[str]) -> bool:  # pragma: no cover
+        """Verifica si se pasaron argumentos (expresión a evaluar)."""
+        return len(args) > 1
+    
+    def _ejecutar_modo_test(self) -> int:  # pragma: no cover
+        """Ejecuta la batería de pruebas internas."""
+        auditoria_final_v41()
+        return 0
+    
+    def _ejecutar_modo_help(self) -> int:  # pragma: no cover
+        """Muestra la ayuda."""
+        mostrar_ayuda()
+        return 0
+    
+    def _ejecutar_modo_argumento(self, args: List[str]) -> int:  # pragma: no cover
+        """
+        Evalúa la expresión pasada como argumentos.
+        
+        Args:
+            args: Argumentos de línea de comandos
+            
+        Returns:
+            0 si éxito, 1 si error
+        """
+        entrada = ' '.join(args[1:])
+        try:
+            res = self.calc.evaluar_expresion(entrada)
+            print(f"= {res}")
+            return 0
+        except RPNError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+    
+    def _ejecutar_modo_interactivo(self) -> int:  # pragma: no cover
+        """Ejecuta el modo interactivo (REPL)."""
+        self._mostrar_bienvenida()
+        
+        while True:
+            try:
+                linea = input("RPN> ").strip()
+            except EOFError:
+                print("\n¡Hasta luego!")
+                return 0
+                
+            if self._es_comando_salida(linea):
+                print("Apagando calculadora...")
+                return 0
+                
+            if linea == 'help':
+                mostrar_ayuda()
+                continue
+                
+            if not linea:
+                continue
+                
+            self._procesar_linea_interactiva(linea)
+    
+    def _es_comando_salida(self, linea: str) -> bool:  # pragma: no cover
+        """Verifica si la línea es un comando de salida."""
+        return linea.lower() in ('q', 'quit', 'exit')
+    
+    def _mostrar_bienvenida(self):  # pragma: no cover
+        """Muestra el mensaje de bienvenida."""
+        print("--- CALCULADORA RPN CIENTÍFICA v4.3 ---")
+        print("Escribe 'help' para ver comandos, 'q' para salir.")
+        print("-" * 60)
+    
+    def _procesar_linea_interactiva(self, linea: str):  # pragma: no cover
+        """
+        Procesa una línea en modo interactivo.
+        
+        Args:
+            linea: Línea ingresada por el usuario
+        """
+        try:
+            res = self.calc.evaluar_expresion(linea)
+            print(f"  -> {res}")
+        except ErrorDominioMatematico as e:
+            print(f"  ⚠️  Dominio inválido: {e}")
+        except DivisionPorCeroError as e:
+            print(f"  ⚠️  Aritmética: {e}")
+        except PilaInsuficienteError as e:
+            print(f"  ⚠️  Pila: {e}")
+        except PilaFinalIncorrectaError as e:
+            print(f"  ⚠️  Estructura: {e}")
+        except TokenInvalidoError as e:
+            print(f"  ⚠️  Sintaxis: {e}")
+        except ErrorIndiceMemoria as e:
+            print(f"  ⚠️  Memoria: {e}")
+        except ErrorMemoriaInvalida as e:
+            print(f"  ⚠️  Memoria: {e}")
+        except RPNError as e:
+            print(f"  ⚠️  Error: {e}")
+
+
+# ==============================================================================
+#  FUNCIONES DE INTERFAZ DE USUARIO (EXCLUIDAS DE COBERTURA)
+# ==============================================================================
+# Estas funciones manejan la interacción con el usuario y son invocadas
+# solo cuando el módulo se ejecuta como script principal.
+# No requieren pruebas unitarias (se prueban manualmente).
+
+def auditoria_final_v41():  # pragma: no cover - Interfaz de usuario / Testing interno
+    """
+    Ejecuta una batería de pruebas internas para verificar la funcionalidad.
+    
+    Esta función se invoca con: python rpn.py --test
+    No está cubierta por pruebas unitarias porque es una herramienta de diagnóstico.
+    """
+    calc = CalculadoraRPN()
+    
+    pruebas = [
+        # Básicos
+        ("3 4 +", 7, None),
+        ("5 1 2 + 4 * + 3 -", 14, None),
+        ("2 3 4 * +", 14, None),
+        # Errores
+        ("3 0 /", None, DivisionPorCeroError),
+        ("4 +", None, PilaInsuficienteError),
+        ("hola", None, TokenInvalidoError),
+        ("1 2", None, PilaFinalIncorrectaError),
+        # Pila
+        ("5 dup *", 25, None),
+        ("2 3 swap -", 1, None),
+        # Constantes
+        ("p", math.pi, None),
+        ("e", math.e, None),
+        # Trigonometría
+        ("90 sin", 1.0, None),
+        ("45 tg", 1.0, None),
+        ("1 asin", 90.0, None),
+        # Memorias
+        ("5 sto 00 rcl 00", 5, None),
+    ]
+    
+    print("=" * 80)
+    print("AUDITORÍA FINAL v4.3 - VERIFICACIÓN DE FUNCIONALIDADES")
+    print("=" * 80)
+    
+    todas_ok = True
+    for expr, esperado, error_esperado in pruebas:
+        try:
+            res = calc.evaluar_expresion(expr)
+            if error_esperado:
+                print(f"❌ FALLO: '{expr}' debió fallar con {error_esperado.__name__}")
+                todas_ok = False
+            elif isinstance(esperado, float):
+                if abs(res - esperado) < 1e-10:
+                    print(f"✅ ÉXITO: '{expr}' = {res}")
+                else:
+                    print(f"❌ FALLO: '{expr}' = {res}, esperado {esperado}")
+                    todas_ok = False
+            else:
+                if res == esperado:
+                    print(f"✅ ÉXITO: '{expr}' = {res}")
+                else:
+                    print(f"❌ FALLO: '{expr}' = {res}, esperado {esperado}")
+                    todas_ok = False
+        except Exception as e:
+            if error_esperado and isinstance(e, error_esperado):
+                print(f"✅ ÉXITO (Error esperado): '{expr}' -> {type(e).__name__}")
+            elif error_esperado:
+                print(f"❌ FALLO: '{expr}' lanzó {type(e).__name__}, esperado {error_esperado.__name__}")
+                todas_ok = False
+            else:
+                print(f"❌ ERROR INESPERADO en '{expr}': {type(e).__name__}: {e}")
+                todas_ok = False
+    
+    if todas_ok:
+        print("-" * 80)
+        print("🏁 AUDITORÍA COMPLETA: Todos los tests pasaron.")
+    else:
+        print("-" * 80)
+        print("⚠️  ATENCIÓN: Se detectaron fallos. Revisar.")
+
+
+def mostrar_ayuda():  # pragma: no cover - Interfaz de usuario
+    """
+    Muestra la ayuda completa de la calculadora en la terminal.
+    
+    Esta función se invoca con: python rpn.py --help
+    """
+    print("""
+╔══════════════════════════════════════════════════════════════════════════╗
+║                    CALCULADORA RPN CIENTÍFICA v4.3                       ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║ OPERADORES BÁSICOS: + - * x /                                            ║
+║                                                                          ║
+║ COMANDOS DE PILA:                                                        ║
+║   dup  - Duplicar el tope de la pila                                     ║
+║   swap - Intercambiar los dos últimos elementos                          ║
+║   drop - Eliminar el tope de la pila                                     ║
+║   clear- Vaciar completamente la pila                                    ║
+║                                                                          ║
+║ CONSTANTES:                                                              ║
+║   p, pi - π (3.14159...)                                                 ║
+║   e     - Número de Euler (2.71828...)                                   ║
+║   j, phi- Número áureo φ (1.61803...)                                    ║
+║                                                                          ║
+║ FUNCIONES MATEMÁTICAS:                                                   ║
+║   sqrt  - Raíz cuadrada                                                  ║
+║   ln    - Logaritmo natural (base e)                                     ║
+║   log   - Logaritmo base 10                                              ║
+║   exp,ex- Exponencial e^x                                                ║
+║   10x   - Potencia de 10 (10^x)                                          ║
+║   pow,yx,^ - Potencia (y^x)                                              ║
+║   inv,1/x - Inverso (1/x)                                                ║
+║   chs,neg - Cambio de signo (+/-)                                        ║
+║                                                                          ║
+║ TRIGONOMETRÍA (EN GRADOS):                                               ║
+║   sin, cos, tg/tan                                                       ║
+║   asin, acos, atg/atan (inversas)                                        ║
+║                                                                          ║
+║ MEMORIAS (00-09):                                                        ║
+║   sto XX - Guardar tope de pila en memoria XX (00-09)                    ║
+║   rcl XX - Recuperar memoria XX a la pila                                ║
+║                                                                          ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║ EJEMPLOS:                                                                ║
+║   "3 4 +"                     = 7                                        ║
+║   "45 sin"                    = 0.707106...                              ║
+║   "0.5 asin"                  = 30.0                                     ║
+║   "5 sto 00 3 * rcl 00 +"     = 20                                       ║
+║   "-3.5 2.5 +"                = -1.0                                     ║
+║   "p 180 / 45 * sin"          = 0.707106...                              ║
+╚══════════════════════════════════════════════════════════════════════════╝
+    """)
+
+
+def main():  # pragma: no cover - Punto de entrada de la aplicación
+    """
+    Punto de entrada principal de la aplicación.
+    
+    Esta función ha sido simplificada delegando en la clase InterfazRPN.
+    """
+    interfaz = InterfazRPN()
+    sys.exit(interfaz.ejecutar(sys.argv))
+
+
+if __name__ == "__main__":
+    main()

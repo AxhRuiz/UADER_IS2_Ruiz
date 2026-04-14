@@ -1,0 +1,25 @@
+# Entorno virtual
+venv/
+env/
+.venv/
+
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Reportes de cobertura
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.swp
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
