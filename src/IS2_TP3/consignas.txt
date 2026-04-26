@@ -1,0 +1,29 @@
+1. Provea una clase que dado un número entero cualquiera retorne el factorial del
+mismo, debe asegurarse que todas las clases que lo invoquen utilicen la misma
+instancia de clase.
+
+2. Elabore una clase para el cálculo del valor de impuestos a ser utilizado por
+todas las clases que necesiten realizarlo. El cálculo de impuestos simplificado
+deberá recibir un valor de importe base imponible y deberá retornar la suma
+del cálculo de IVA (21%), IIBB (5%) y Contribuciones municipales (1,2%) sobre
+esa base imponible.
+
+3. Genere una clase donde se instancie una comida rápida “hamburguesa” que
+pueda ser entregada en mostrador, retirada por el cliente o enviada por
+delivery. A los efectos prácticos bastará que la clase imprima el método de
+entrega.
+
+4. Implemente una clase “factura” que tenga un importe correspondiente al total
+de la factura pero de acuerdo a la condición impositiva del cliente (IVA
+Responsable, IVA No Inscripto, IVA Exento) genere facturas que indiquen tal
+condición.
+
+5. Extienda el ejemplo visto en el taller en clase de forma que se pueda utilizar
+para construir aviones en lugar de vehículos. Para simplificar suponga que un
+avión tiene un “body”, 2 turbinas, 2 alas y un tren de aterrizaje.
+
+6. Dado una clase que implemente el patrón “prototipo” verifique que una clase
+generada a partir de ella permite por su parte obtener también copias de si
+misma.
+
+7. Imagine una situación donde pueda ser de utilidad el patrón “abstract factory”.
