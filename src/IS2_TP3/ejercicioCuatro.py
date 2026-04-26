@@ -43,3 +43,13 @@ class FacturaFactory:
 
 def main() -> None:
     tipos= ["IVA Inscripto", "IVA No Inscripto", "IVA Exento"]
+    factory= FacturaFactory()
+    for tipo in tipos:
+        try:    
+            factura= factory.crear_factura(35.5, tipo)
+            print(f"{tipo} -> {factura.generar()}")
+        except ValueError as error:
+            print(f"Error: {error}")
+
+if __name__ =="__main__":
+    main()
