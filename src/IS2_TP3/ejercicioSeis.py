@@ -5,21 +5,22 @@ misma."""
 import copy
 from abc import ABC, abstractmethod
 
-class Prototype(ABC):
+class Prototype(ABC): #interfaz abstracta para prototype.
     
     @abstractmethod
-    def clone(self):
+    def clone(self): #Crea y retorna una copia exacta del objeto
         pass
-class Documento(Prototype):
-    def __init__(self, titulo:str, contenido: str, metdata: dict):
+class Documento(Prototype): #documento clonable que implemnta el patron
+    
+    def __init__(self, titulo:str, contenido: str, metdata: dict):#inicializa un nuevo document
         self.titulo = titulo
         self.contenido= contenido
         self.metdata = metdata
     
     def clone(self):
-        return copy.deepcopy(self)
+        return copy.deepcopy(self) #deepcopy garantiza copias independientes
     
-    def __str__(self) -> str:
+    def __str__(self) -> str: #retorna una representacion legible del documento
         return(
             f"Documento:\n"
             f"  Título: {self.titulo}\n"
@@ -29,6 +30,7 @@ class Documento(Prototype):
         
 
 def main()-> None:
+    #Documento original
     Doc_org= Documento(
         titulo="Informe",
         contenido="Novedades",
@@ -42,7 +44,7 @@ def main()-> None:
     print("-----Documento Original-----")
     print(Doc_org)
     
-    doc_clon = Doc_org.clone()
+    doc_clon = Doc_org.clone()#primera copia del original
     
     doc_clon.titulo= "Informe - copia"
     doc_clon.metdata["version"]= 2
@@ -51,7 +53,7 @@ def main()-> None:
     print("-----Documento Copiado Modificado-----")
     print(doc_clon)
     
-    doc_clon2= doc_clon.clone()
+    doc_clon2= doc_clon.clone()#seguda clonacion, copia de la copia
     
     doc_clon2.titulo="Informe - Copia de copia"
     doc_clon2.metdata["version"]= 3

@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 
+#Productos Abstractos!
 class Hamburguesa(ABC):
     
     @abstractmethod
@@ -18,6 +19,7 @@ class Bebida(ABC):
     def descripcion(self) -> str:
         pass
 
+#Productos Concretos - Hamburguesas
 class HamburguesaCarne(Hamburguesa):
     def descripcion(self) -> str:
         return ("Hamburguesa de carne")
@@ -29,6 +31,8 @@ class HamburguesaSoja(Hamburguesa):
 class HamburguersaDobleCarne(Hamburguesa):
     def descripcion(self)->str:
         return("Doble hamburguesa de carne")
+    
+#Productos concetros - Guarniciones
     
 class PapasFritas(Guarnicion):
     def descripcion(self)-> str:
@@ -42,6 +46,8 @@ class DoblePapasFritas(Guarnicion):
     def descripcion(self)->str:
         return("Doble porcion de papas fritas")
     
+#Productos concretos - Bebidas
+    
 class Gaseosa(Bebida):
     def descripcion(self) -> str:
         return "Gaseosa"
@@ -53,8 +59,10 @@ class Agua(Bebida):
 class GaseosaGrande(Bebida):
     def descripcion(self) -> str:
         return "Gaseosa grande"
-    
-class ComboFactory(ABC):
+
+#Fabrica Abstracta    
+class ComboFactory(ABC):#Fabrica Abstracta para crear combos de comida
+    #define la interfaz para crear familias de productos relacionados.
     @abstractmethod
     def crear_hamburguesa(self)-> Hamburguesa:
         pass
@@ -68,7 +76,8 @@ class ComboFactory(ABC):
         pass
     
 #FABRICA 1
-class ComboClasicoFactory(ComboFactory):
+class ComboClasicoFactory(ComboFactory): #Fabrica concreta para el combo clasico
+    #produce: hamburuesa de carne, papas fritas, gaseosa
     def crear_hamburguesa(self) -> Hamburguesa:
         return HamburguesaCarne()
     
@@ -79,7 +88,8 @@ class ComboClasicoFactory(ComboFactory):
         return Gaseosa()
     
 #FABRICA 2
-class ComboVeganoFactory(ComboFactory):
+class ComboVeganoFactory(ComboFactory):#Fabrica concreta para el combo vegano
+    #Produce: Hamburguesa de soja, ensalada fresca, agua mineral
     def crear_hamburguesa(self) -> Hamburguesa:
         return HamburguesaSoja()
     
@@ -88,8 +98,10 @@ class ComboVeganoFactory(ComboFactory):
     
     def crear_bebida(self)-> Bebida:
         return Agua()
-    
-class ComboExtraGrandeFactory(ComboFactory):
+
+#FABRICA 3    
+class ComboExtraGrandeFactory(ComboFactory):# Fabrica concreta para el combo extra grande
+    #produce: Doble hamburguesa de carne, doble papas fritas, gaseosa grande
     def crear_hamburguesa(self)-> Hamburguesa:
         return HamburguersaDobleCarne()
     
@@ -111,7 +123,7 @@ def mostrar_combo(factory: ComboFactory, nombre: str) -> None:
     print(f"{guarnicion.descripcion()}")
     print(f"{bebida.descripcion()}")
 
-def main() -> None:
+def main() -> None: 
     
     mostrar_combo(ComboClasicoFactory(), "Combo Clásico")
     
